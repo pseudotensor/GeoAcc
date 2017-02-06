@@ -62,13 +62,12 @@ numchunks_test = 8;
 
 
 
-%{
 %%%%%%%%
 % FACES
 %%%%%%%%
 
 %dataset available at www.cs.toronto.edu/~jmartens/newfaces_rot_single.mat
-
+%{
 load newfaces_rot_single
 total = 165600;
 trainsize = (total/40)*25;
@@ -95,18 +94,18 @@ layersizes = [2000 1000 500 30 500 1000 2000];
 %standard L_2 weight-decay:
 weightcost = 1e-5;
 weightcost = weightcost / 2; %an older version of the code used in the paper had a differently scaled objective (by 2) in the case of linear output units.  Thus we now need to reduce weightcost by a factor 2 to be consistent
+weightcost = 0 % JCM: because want low error on training, not test.
 
-numchunks = 20;
+% JCM: number of mini-batches.
+numchunks = 20; % training
 numchunks_test = 8;
 %%%%%%%%
 %}
 
-
-%{
 %%%%%%%%
 % CURVES
 %%%%%%%%
-
+%{
 %dataset available at www.cs.toronto.edu/~jmartens/digs3pts_1.mat
 tmp = load('digs3pts_1.mat');
 indata = tmp.bdata';
@@ -122,6 +121,8 @@ indata = indata( :, perm );
 %outdata = outdata( :, perm );
 
 layersizes = [400 200 100 50 25 6 25 50 100 200 400];
+% JCM: replace logistic with linear in last layer.
+% if linear in last layer, use L2.
 layertypes = {'logistic', 'logistic', 'logistic', 'logistic', 'logistic', 'linear', 'logistic', 'logistic', 'logistic', 'logistic', 'logistic', 'logistic'};
 
 %standard L_2 weight-decay:
@@ -132,10 +133,21 @@ numchunks_test = 4;
 %%%%%%%%
 %}
 
+
+%{
+%it's an auto-encoder so output is input
+%reduce dimension
+indata = indata(1:4,:);
+intest = intest(1:4,:);
+layersizes = [2];
+layertypes = {'linear','logistic'};
+outdata = indata;
+outtest = intest;
+%}
+
 %it's an auto-encoder so output is input
 outdata = indata;
 outtest = intest;
-
 
 
 
@@ -171,7 +183,10 @@ jacket = 1;
 
 errtype = 'L2'; %report the L2-norm error (in addition to the quantity actually being optimized, i.e. the log-likelihood)
 
-runName = 'test_geoorig';
+runName = 'test_geo_gpu';
 
-% nnet_train_ng( runName, runDesc, paramsp, Win, bin, resumeFile, maxepoch, indata, outdata, numchunks, intest, outtest, numchunks_test, layersizes, layertypes, mattype, rms, errtype, hybridmode, weightcost, decay, jacket);
+% JCM: ng = natural gradient
+%nnet_train_ng( runName, runDesc, paramsp, Win, bin, resumeFile, maxepoch, indata, outdata, numchunks, intest, outtest, numchunks_test, layersizes, layertypes, mattype, rms, errtype, hybridmode, weightcost, decay, jacket);
+
+% JCM: geo = geodesic acceleration
 nnet_train_geo( runName, runDesc, paramsp, Win, bin, resumeFile, maxepoch, indata, outdata, numchunks, intest, outtest, numchunks_test, layersizes, layertypes, mattype, rms, errtype, hybridmode, weightcost, decay, jacket);

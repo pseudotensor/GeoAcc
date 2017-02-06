@@ -425,12 +425,15 @@ function HV = computeHV(V)
 end
 
 
+% JCM: algorithm3 and algorithm4 (same, most closely follows algorithm4)
 %compute the vector-product with the Gauss-Newton matrix
+% V : arbitrary vector (gradient)
+% JCM: GV: g_{\mu\nu}
 function GV = computeGV(V)
 
     [VWu, Vbu] = unpack(V);
     
-    GV = mzeros(psize,1);
+    GV = mzeros(psize,1); % JCM: flattened version
     
     if hybridmode
         chunkrange = targetchunk; %set outside
@@ -563,10 +566,15 @@ function GV = computeGV(V)
     if autodamp
         GV = GV - conv(lambda)*V;
     end
+   
+    
+    % GV = nxn dimensional matrix
     
 end
 
-function GV = term1(V)
+% JCM: no need for algorithm2
+
+function GV = term1(V) % algorithm5
 
     [VWu, Vbu] = unpack(V);
     
@@ -691,7 +699,7 @@ function GV = term1(V)
     GV = GV - conv(weightcost)*(maskp.*V);    
 end
 
-function GV = term2(V)
+function GV = term2(V) % algorithm6
 
     [VWu, Vbu] = unpack(V);
     
@@ -1280,7 +1288,7 @@ for epoch = epoch:maxepoch
             y{chunk, i+1} = store(yip1);
         end
 
-        %back prop:
+        %back prop: JCM: algorithm1
         %cross-entropy for logistics:
         %dEdy{numlayers+1} = outdata./y{numlayers+1} - (1-outdata)./(1-y{numlayers+1});
         %cross-entropy for softmax:
@@ -1705,6 +1713,8 @@ for epoch = epoch:maxepoch
     end
         
     %Parameter update:
+    % JCM: chs1: natural gradient
+    % JCM: chs2: geodesic acceleration term
     paramsp = paramsp + conv(rate)*chs1{j} - 0.5*conv(rate^2)*chs2{j};
 
     lambdarecord(epoch,1) = lambda;
