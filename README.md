@@ -19,9 +19,18 @@ http://www.cs.toronto.edu/~jmartens/research.html (Codes HFDemo.zip and KFAC3-MA
 
 # To run:
 
-* Download data: wget www.cs.toronto.edu/~jmartens/digs3pts_1.mat
+* Download data:
+
+wget www.cs.toronto.edu/~jmartens/mnist_all.mat
+wget www.cs.toronto.edu/~jmartens/digs3pts_1.mat
 
 * Open in Matlab: nnet_demo_2.m file
+
+* Choose which dataset by uncommenting relevant section of code in nnet_demo_2.m
+
+* At bottom, choose either ng or geo
+
+* Set jacket=1
 
 * Hit Run
 

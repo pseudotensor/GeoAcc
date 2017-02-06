@@ -1,4 +1,5 @@
-function paramsp = nnet_train_2( runName, runDesc, paramsp, Win, bin, resumeFile, maxepoch, indata, outdata, numchunks, intest, outtest, numchunks_test, layersizes, layertypes, mattype, rms, errtype, hybridmode, weightcost, decay, jacket)
+function paramsp = nnet_train_geo( runName, runDesc, paramsp, Win, bin, resumeFile, maxepoch, indata, outdata, numchunks, intest, outtest, numchunks_test, layersizes, layertypes, mattype, rms, errtype, hybridmode, weightcost, decay, jacket)
+% This is a version augmented with geodesic acceleration!
 %
 % Demo code for the paper "Deep Learning via Hessian-free Optimization" by James Martens.
 %
@@ -133,6 +134,7 @@ elseif strcmp(mattype, 'empfish')
     storeD = 0;
     computeBV = @computeFV;
 end
+
 
 
 % Hack here
@@ -564,7 +566,253 @@ function GV = computeGV(V)
     
 end
 
+function GV = term1(V)
 
+    [VWu, Vbu] = unpack(V);
+    
+    GV = mzeros(psize,1);
+    
+    if hybridmode
+        chunkrange = targetchunk; %set outside
+    else
+        chunkrange = 1:numchunks;
+    end
+
+    for chunk = chunkrange
+        
+        %application of R operator
+        rdEdy = cell(numlayers+1,1);
+        rdEdx = cell(numlayers, 1);
+
+        GVW = cell(numlayers,1);
+        GVb = cell(numlayers,1);
+        
+        Rx = cell(numlayers,1);
+        Ry = cell(numlayers,1);
+
+        yip1 = conv(y{chunk, 1});
+
+        %forward prop:
+        Ryip1 = mzeros(layersizes(1), sizechunk);
+        Syip1 = mzeros(layersizes(1), sizechunk);
+            
+        for i = 1:numlayers
+
+            Ryi = Ryip1;
+            Ryip1 = [];
+            Syi = Syip1;
+            Syip1 = [];
+
+            yi = yip1;
+            yip1 = [];
+
+            Rxi = Wu{i}*Ryi + VWu{i}*yi + repmat(Vbu{i}, [1 sizechunk]);          
+            %Rx{i} = store(Rxi);
+            Sxi = 2 * VWu{i} * Ryi + Wu{i} * Syi;
+
+            yip1 = conv(y{chunk, i+1});
+
+            if strcmp(layertypes{i}, 'logistic')
+                Ryip1 = Rxi.*yip1.*(1-yip1);
+                Syip1 = (2*yip1-1).*yip1.*(yip1-1).*Rxi.*Rxi + yip1.*(1-yip1).*Sxi; 
+            elseif strcmp(layertypes{i}, 'tanh')
+                Ryip1 = Rxi.*(1+yip1).*(1-yip1);
+                Syip1 = (yip1-1).*(yip1+1).*(2*yip1).*Rxi.*Rxi + (1+yip1).*(1-yip1).*Sxi; 
+            elseif strcmp(layertypes{i}, 'linear')
+                Ryip1 = Rxi;
+                Syip1 = Sxi;            
+            else
+                error( 'Unknown/unsupported layer type' );
+            end
+            
+            Rxi = [];
+            Sxi = [];
+        end
+        
+        %Backwards pass.  This is where things start to differ from computeHV  Please note that the lower-case r 
+        %notation doesn't really make sense so don't bother trying to decode it.  Instead there is a much better
+        %way of thinkin about the GV computation, with its own notation, which I talk about in my more recent paper: 
+        %"Learning Recurrent Neural Networks with Hessian-Free Optimization"
+        for i = numlayers:-1:1
+
+            if i < numlayers
+                %logistics:
+                if strcmp(layertypes{i}, 'logistic')
+                    rdEdx{i} = rdEdy{i+1}.*yip1.*(1-yip1);
+                elseif strcmp(layertypes{i}, 'tanh')
+                    rdEdx{i} = rdEdy{i+1}.*(1+yip1).*(1-yip1);
+                elseif strcmp(layertypes{i}, 'linear')
+                    rdEdx{i} = rdEdy{i+1};
+                else
+                    error( 'Unknown/unsupported layer type' );
+                end
+            else
+                if ~rms
+                    %assume canonical link functions:
+                    rdEdx{i} = Syip1; % Correct the sign
+                    
+                    if strcmp(layertypes{i}, 'linear')
+                        rdEdx{i} = 2*rdEdx{i};
+                    end
+                else
+                    error( 'Not supported in term1' );                                        
+                end
+                
+                Ryip1 = [];
+                Syip1 = [];
+            end
+            rdEdy{i+1} = [];
+            
+            rdEdy{i} = Wu{i}'*rdEdx{i};
+
+            yi = conv(y{chunk, i});
+
+            GVW{i} = rdEdx{i}*yi';
+            GVb{i} = sum(rdEdx{i},2);
+
+            rdEdx{i} = [];
+
+            yip1 = yi;
+            yi = [];
+        end
+        yip1 = [];
+        rdEdy{1} = [];
+
+        GV = GV + pack(GVW, GVb);
+        
+    end
+    
+    GV = GV / conv(numcases);
+    
+    if hybridmode
+        GV = GV * conv(numchunks);
+    end
+    %???? I am not sure about this
+    GV = GV - conv(weightcost)*(maskp.*V);    
+end
+
+function GV = term2(V)
+
+    [VWu, Vbu] = unpack(V);
+    
+    GV = mzeros(psize,1);
+    
+    if hybridmode
+        chunkrange = targetchunk; %set outside
+    else
+        chunkrange = 1:numchunks;
+    end
+
+    for chunk = chunkrange
+        
+        %application of R operator
+        rdEdy = cell(numlayers+1,1);
+        rdEdx = cell(numlayers, 1);
+
+        GVW = cell(numlayers,1);
+        GVb = cell(numlayers,1);
+        
+        Rx = cell(numlayers,1);
+        Ry = cell(numlayers,1);
+
+        yip1 = conv(y{chunk, 1});
+
+        %forward prop:
+        Ryip1 = mzeros(layersizes(1), sizechunk);
+            
+        for i = 1:numlayers
+
+            Ryi = Ryip1;
+            Ryip1 = [];
+
+            yi = yip1;
+            yip1 = [];
+
+            Rxi = Wu{i}*Ryi + VWu{i}*yi + repmat(Vbu{i}, [1 sizechunk]);
+            %Rx{i} = store(Rxi);
+
+            yip1 = conv(y{chunk, i+1});
+
+            if strcmp(layertypes{i}, 'logistic')
+                Ryip1 = Rxi.*yip1.*(1-yip1);
+            elseif strcmp(layertypes{i}, 'tanh')
+                Ryip1 = Rxi.*(1+yip1).*(1-yip1);
+            elseif strcmp(layertypes{i}, 'linear')
+                Ryip1 = Rxi;
+            elseif strcmp( layertypes{i}, 'softmax' )
+                Ryip1 = Rxi.*yip1 - yip1.* repmat( sum( Rxi.*yip1, 1 ), [layersizes(i+1) 1] );
+            else
+                error( 'Unknown/unsupported layer type' );
+            end
+            
+            Rxi = [];
+
+        end
+        
+        %Backwards pass.  This is where things start to differ from computeHV  Please note that the lower-case r 
+        %notation doesn't really make sense so don't bother trying to decode it.  Instead there is a much better
+        %way of thinkin about the GV computation, with its own notation, which I talk about in my more recent paper: 
+        %"Learning Recurrent Neural Networks with Hessian-Free Optimization"
+        for i = numlayers:-1:1
+
+            if i < numlayers
+                %logistics:
+                if strcmp(layertypes{i}, 'logistic')
+                    rdEdx{i} = rdEdy{i+1}.*yip1.*(1-yip1);
+                elseif strcmp(layertypes{i}, 'tanh')
+                    rdEdx{i} = rdEdy{i+1}.*(1+yip1).*(1-yip1);
+                elseif strcmp(layertypes{i}, 'linear')
+                    rdEdx{i} = rdEdy{i+1};
+                else
+                    error( 'Unknown/unsupported layer type' );
+                end
+            else
+                if ~rms
+                    %assume canonical link functions:
+                    yip1 = conv(y{chunk, numlayers + 1});
+                    coeff = ((2*yip1-1)./2./(yip1.*(1-yip1)));
+                    coeff(Ryip1 == 0) = 0;
+                    rdEdx{i} = coeff.*Ryip1.^2; % correct the sign
+                    
+                    if strcmp(layertypes{i}, 'linear')
+                        rdEdx{i} = 2*rdEdx{i};
+                    end
+                else                    
+                    error(' Not supported in term2!')                    
+                end
+                
+                Ryip1 = [];
+
+            end
+            rdEdy{i+1} = [];
+            
+            rdEdy{i} = Wu{i}'*rdEdx{i};
+
+            yi = conv(y{chunk, i});
+
+            GVW{i} = rdEdx{i}*yi';
+            GVb{i} = sum(rdEdx{i},2);
+
+            rdEdx{i} = [];
+
+            yip1 = yi;
+            yi = [];
+        end
+        yip1 = [];
+        rdEdy{1} = [];
+
+        GV = GV + pack(GVW, GVb);
+        
+    end
+    
+    GV = GV / conv(numcases);
+    
+    if hybridmode
+        GV = GV * conv(numchunks);
+    end
+    %???? I am not sure about this!
+    GV = GV - conv(weightcost)*(maskp.*V);        
+end
 %compute the vector-product with the emperical Fisher matrix
 function FV = computeFV(V)
 
@@ -878,7 +1126,8 @@ outputString( ['Description: ' runDesc] );
 outputString( '' );
 
 
-ch = mzeros(psize, 1);
+ch1 = mzeros(psize, 1);
+ch2 = mzeros(psize, 1);
 
 if ~isempty( resumeFile )
     outputString( ['Resuming from file: ' resumeFile] );
@@ -886,8 +1135,8 @@ if ~isempty( resumeFile )
     
     load( resumeFile );
     
-    ch = conv(ch);
-
+    ch1 = conv(ch1);
+    ch2 = conv(ch2);
     epoch = epoch + 1;
 else
     
@@ -1075,7 +1324,7 @@ for epoch = epoch:maxepoch
                     dEdxi = outc - yip1; %simplified due to canonical link
 
                     if strcmp(layertypes{i}, 'linear')
-                        dEdxi = 2*dEdxi;  %the convention is to use the makeDoubled version of the squared-error objective
+                        dEdxi = 2*dEdxi;  %the convention is to use the doubled version of the squared-error objective
                     end
 
                     
@@ -1279,8 +1528,8 @@ for epoch = epoch:maxepoch
     %initialization.  This is something I didn't mention in the paper,
     %and it's not overly important but it can help a lot in some situations 
     %so you should probably use it
-    ch = conv(decay)*ch;
-
+    ch1 = conv(decay)*ch1;
+    ch2 = conv(decay)*ch2;
     %maxiters is the most important variable that you should try
     %tweaking.  While the ICML paper had maxiters=250 for everything
     %I've since found out that this wasn't optimal.  For example, with
@@ -1289,11 +1538,11 @@ for epoch = epoch:maxepoch
     %Setting it too small or large can be bad to various degrees.
     %Currently I'm trying to automate"this choice, but it's quite hard
     %to come up with a *robust* heuristic for doing this.
-
+    
     maxiters = 250;
     miniters = 1;
     outputString(['maxiters = ' num2str(maxiters) '; miniters = ' num2str(miniters)]);
-
+    
     %preconditioning vector.  Feel free to experiment with this.  For
     %some problems (like the RNNs) this style of diaognal precondition
     %doesn't seem to be beneficial.  Probably because the parameters don't
@@ -1301,21 +1550,40 @@ for epoch = epoch:maxepoch
     %standard deep neural nets
     precon = (grad2 + mones(psize,1)*conv(lambda) + maskp*conv(weightcost)).^(3/4);
     %precon = mones(psize,1);
-
-    [chs, iterses] = conjgrad_1( @(V)-computeBV(V), grad, ch, ceil(maxiters), ceil(miniters), precon , jacket);
-
-    ch = chs{end};
-    iters = iterses(end);
+    
+    [chs1, iterses1] = conjgrad_1( @(V)-computeBV(V), grad, ch1, ceil(maxiters), ceil(miniters), precon, jacket);
+    ch1 = chs1{end};
+    if strcmp(layertypes{numlayers}, 'logistic')
+        [chs2, iterses2] = conjgrad_1(@(V)-computeBV(V), term1(ch1) + term2(ch1), ch2, ceil(maxiters), ceil(miniters), precon, jacket);           
+    elseif strcmp(layertypes{numlayers}, 'linear')
+        [chs2, iterses2] = conjgrad_1(@(V)-computeBV(V), term1(ch1), ch2, ceil(maxiters), ceil(miniters), precon, jacket);                      
+    else
+        error('loss not supported!')
+    end
+    ch2 = chs2{end};
+    ch = ch1 - 0.5 * ch2;
+    
+    iters = iterses1(end) + iterses2(end);
 
     totalpasses = totalpasses + iters;
-    outputString(['CG steps used: ' num2str(iters) ', total is: ' num2str(totalpasses) ]);
+    outputString(['CG steps used: ' num2str(iters) ', including geodesic acceleration. Total is: ' num2str(totalpasses) ]);
 
     p = ch;
-    outputString( ['ch magnitude : ' num2str(makeDouble(norm(ch)))] );
-
-
-
-
+    outputString( ['ng term magnitude : ' num2str(makeDouble(norm(chs1{end})))] );
+    outputString( ['geo term magnitude : ' num2str(makeDouble(norm(chs2{end})))] );
+    outputString( ['angle between ng and geo : ' num2str(acos(-makeDouble(ch1)' * ch2 / norm(ch1) / norm(ch2)) * 180/pi)]);
+        
+    len = min(length(chs1), length(chs2));
+    chs = cell(1, len);
+    chs1 = chs1(end - len + 1:end);
+    chs2 = chs2(end - len + 1:end);
+    iterses = mzeros(1,len);
+    iterses1 = iterses1(end - len + 1:end);
+    iterses2 = iterses2(end - len + 1:end);
+    for k = 1:len
+        chs{k} = chs1{k} - 0.5 * chs2{k};
+        iterses(k) = iterses1(k) + iterses2(k);
+    end
     j = length(chs);
     
 
@@ -1355,6 +1623,7 @@ for epoch = epoch:maxepoch
     %}
 
     %full training set version:
+    
     [ll, err] = computeLL(paramsp + p, indata, outdata, numchunks);
     for j = (length(chs)-1):-1:1
         [lowll, lowerr] = computeLL(paramsp + chs{j}, indata, outdata, numchunks);
@@ -1373,8 +1642,8 @@ for epoch = epoch:maxepoch
     
     p = chs{j};
     outputString( ['Chose iters : ' num2str(iterses(j))] );
-
-
+    
+    
     [ll_chunk, err_chunk] = computeLL(paramsp + chs{j}, indata, outdata, numchunks, targetchunk);
     [oldll_chunk, olderr_chunk] = computeLL(paramsp, indata, outdata, numchunks, targetchunk);
 
@@ -1399,30 +1668,30 @@ for epoch = epoch:maxepoch
     rate = 1.0;
 
     c = 10^(-2);
-    j = 0;
-    while j < 60
+    k = 0;
+    while k < 60
 
-        if ll >= oldll + c*rate*makeDouble(grad'*p)
+        if ll >= oldll + c*makeDouble(grad'*(conv(rate)*chs1{j} - 0.5*conv(rate^2)*chs2{j}))
             break;
         else
             rate = 0.8*rate;
-            j = j + 1;
+            k = k + 1;
             %outputString('#');
         end
 
         %this is computed on the whole dataset.  If this is not possible you can
         %use another set such the test set or a seperate validation set
-        [ll, err] = computeLL(paramsp + conv(rate)*p, indata, outdata, numchunks);
+        [ll, err] = computeLL(paramsp + conv(rate)*chs1{j} - 0.5 * conv(rate^2)*chs2{j}, indata, outdata, numchunks);
     end
 
-    if j == 60
+    if k == 60
         %completely reject the step
-        j = Inf;
+        k = Inf;
         rate = 0.0;
         ll = oldll;
     end
 
-    outputString( ['Number of reductions : ' num2str(j) ', chosen rate: ' num2str(rate)] );
+    outputString( ['Number of reductions : ' num2str(k) ', chosen rate: ' num2str(rate)] );
 
 
     %the damping heuristic (also very standard in optimization):
@@ -1435,14 +1704,14 @@ for epoch = epoch:maxepoch
         outputString(['New lambda: ' num2str(lambda)]);
     end
         
-
     %Parameter update:
-    paramsp = paramsp + conv(rate)*p;
+    paramsp = paramsp + conv(rate)*chs1{j} - 0.5*conv(rate^2)*chs2{j};
 
     lambdarecord(epoch,1) = lambda;
 
     llrecord(epoch,1) = ll;
     errrecord(epoch,1) = err;
+    toc
     times(epoch) = toc;
     outputString( ['epoch: ' num2str(epoch) ', Log likelihood: ' num2str(ll) ', error rate: ' num2str(err) ] );
 
@@ -1459,17 +1728,20 @@ for epoch = epoch:maxepoch
     drawnow
     
     tmp = paramsp;
-    paramsp = single(paramsp);
-    tmp2 = ch;
-    ch = single(ch);
-    save( [runName '_nnet_running.mat'], 'paramsp', 'ch', 'epoch', 'lambda', 'totalpasses', 'llrecord', 'times', 'errrecord', 'lambdarecord' );
+    paramsp = single(paramsp);    
+    tmp3 = ch1;
+    ch1 = single(ch1);
+    tmp4 = ch2;
+    ch2 = single(ch2);
+    save( [runName '_nnet_running.mat'], 'paramsp', 'ch1', 'ch2' , 'epoch', 'lambda', 'totalpasses', 'llrecord', 'times', 'errrecord', 'lambdarecord' );
     if mod(epoch,10) == 0
-        save( [runName '_nnet_epoch' num2str(epoch) '.mat'], 'paramsp', 'ch', 'epoch', 'lambda', 'totalpasses', 'llrecord', 'times', 'errrecord', 'lambdarecord' );
+        save( [runName '_nnet_epoch' num2str(epoch) '.mat'], 'paramsp', 'ch1', 'ch2', 'epoch', 'lambda', 'totalpasses', 'llrecord', 'times', 'errrecord', 'lambdarecord' );
     end
-    paramsp = tmp;
-    ch = tmp2;
+    paramsp = tmp;    
+    ch1 = tmp3;
+    ch2 = tmp4;
 
-    clear tmp tmp2
+    clear tmp tmp2 tmp3 tmp4
 
 end
 

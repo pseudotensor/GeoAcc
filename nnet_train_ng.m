@@ -1,4 +1,5 @@
-function paramsp = nnet_train_2( runName, runDesc, paramsp, Win, bin, resumeFile, maxepoch, indata, outdata, numchunks, intest, outtest, numchunks_test, layersizes, layertypes, mattype, rms, errtype, hybridmode, weightcost, decay, jacket)
+function paramsp = nnet_train_ng( runName, runDesc, paramsp, Win, bin, resumeFile, maxepoch, indata, outdata, numchunks, intest, outtest, numchunks_test, layersizes, layertypes, mattype, rms, errtype, hybridmode, weightcost, decay, jacket)
+% This is a version without CG backtracking!
 %
 % Demo code for the paper "Deep Learning via Hessian-free Optimization" by James Martens.
 %
@@ -95,7 +96,7 @@ function paramsp = nnet_train_2( runName, runDesc, paramsp, Win, bin, resumeFile
 
 
 
-
+tic
 
 disp( ['Starting run named: ' runName ]);
 
@@ -133,6 +134,7 @@ elseif strcmp(mattype, 'empfish')
     storeD = 0;
     computeBV = @computeFV;
 end
+
 
 
 % Hack here
@@ -1075,7 +1077,7 @@ for epoch = epoch:maxepoch
                     dEdxi = outc - yip1; %simplified due to canonical link
 
                     if strcmp(layertypes{i}, 'linear')
-                        dEdxi = 2*dEdxi;  %the convention is to use the makeDoubled version of the squared-error objective
+                        dEdxi = 2*dEdxi;  %the convention is to use the doubled version of the squared-error objective
                     end
 
                     
@@ -1302,7 +1304,7 @@ for epoch = epoch:maxepoch
     precon = (grad2 + mones(psize,1)*conv(lambda) + maskp*conv(weightcost)).^(3/4);
     %precon = mones(psize,1);
 
-    [chs, iterses] = conjgrad_1( @(V)-computeBV(V), grad, ch, ceil(maxiters), ceil(miniters), precon , jacket);
+    [chs, iterses] = conjgrad_1( @(V)-computeBV(V), grad, ch, ceil(maxiters), ceil(miniters), precon, jacket );
 
     ch = chs{end};
     iters = iterses(end);
@@ -1355,6 +1357,7 @@ for epoch = epoch:maxepoch
     %}
 
     %full training set version:
+    
     [ll, err] = computeLL(paramsp + p, indata, outdata, numchunks);
     for j = (length(chs)-1):-1:1
         [lowll, lowerr] = computeLL(paramsp + chs{j}, indata, outdata, numchunks);
@@ -1373,8 +1376,8 @@ for epoch = epoch:maxepoch
     
     p = chs{j};
     outputString( ['Chose iters : ' num2str(iterses(j))] );
-
-
+    
+    
     [ll_chunk, err_chunk] = computeLL(paramsp + chs{j}, indata, outdata, numchunks, targetchunk);
     [oldll_chunk, olderr_chunk] = computeLL(paramsp, indata, outdata, numchunks, targetchunk);
 
@@ -1443,6 +1446,7 @@ for epoch = epoch:maxepoch
 
     llrecord(epoch,1) = ll;
     errrecord(epoch,1) = err;
+    toc
     times(epoch) = toc;
     outputString( ['epoch: ' num2str(epoch) ', Log likelihood: ' num2str(ll) ', error rate: ' num2str(err) ] );
 

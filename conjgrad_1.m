@@ -1,5 +1,10 @@
-function [xs, is] = conjgrad_1( Afunc, b, x0, maxiters, miniters, Mdiag )
+function [xs, is] = conjgrad_1( Afunc, b, x0, maxiters, miniters, Mdiag, jacket )
 
+if jacket == 1
+    makeDouble = @(x) double(gather(x));
+else
+    makeDouble = @double;
+end
 
 tolerance = 5e-4;
 
@@ -23,8 +28,8 @@ p = -y;
 x = x0;
 
 %val is the value of the quadratic model
-val = 0.5*double((-b+r)'*x);
-%disp( ['iter ' num2str(0) ': ||x|| = ' num2str(double(norm(x))) ', ||r|| = ' num2str(double(norm(r))) ', ||p|| = ' num2str(double(norm(p))) ', val = ' num2str( val ) ]);
+val = 0.5*makeDouble((-b+r)'*x);
+%disp( ['iter ' num2str(0) ': ||x|| = ' num2str(makeDouble(norm(x))) ', ||r|| = ' num2str(makeDouble(norm(r))) ', ||p|| = ' num2str(makeDouble(norm(p))) ', val = ' num2str( val ) ]);
 
 for i = 1:maxiters
     
@@ -58,10 +63,10 @@ for i = 1:maxiters
     y = y_new;
 
     
-    val = 0.5*double((-b+r)'*x);
+    val = 0.5*makeDouble((-b+r)'*x);
     vals( mod(i-1, maxtestgap)+1 ) = val;
     
-    %disp( ['iter ' num2str(i) ': ||x|| = ' num2str(double(norm(x))) ', ||r|| = ' num2str(double(norm(r))) ', ||p|| = ' num2str(double(norm(p))) ', val = ' num2str( val ) ]);
+    %disp( ['iter ' num2str(i) ': ||x|| = ' num2str(makeDouble(norm(x))) ', ||r|| = ' num2str(makeDouble(norm(r))) ', ||p|| = ' num2str(makeDouble(norm(p))) ', val = ' num2str( val ) ]);
     
     testgap = max(ceil( i * gapratio ), mingap);
     prevval = vals( mod(i-testgap-1, maxtestgap)+1 ); %testgap steps ago
