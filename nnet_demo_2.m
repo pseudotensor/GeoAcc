@@ -6,11 +6,11 @@ randn('state', seed );
 rand('twister', seed+1 );
 
 
-maxiter = 20000;
+maxiter = 3000;
 
 %uncomment the appropriate section to use a particular dataset
 
-%{
+
 %%%%%%%%
 % MNIST
 %%%%%%%%
@@ -51,8 +51,12 @@ layertypes = {'logistic', 'logistic', 'logistic', 'linear', 'logistic', 'logisti
 
 %standard L_2 weight-decay:
 weightcost = 1e-5;
+
+runName = 'KFAC3_mnist_1';
+runDesc = '[[version 5]], expected output for MNIST';
+
 %%%%%%%%
-%}
+
 
 
 %{
@@ -89,6 +93,9 @@ layersizes = [2000 1000 500 30 500 1000 2000];
 weightcost = 1e-5;
 weightcost = weightcost / 2; %an older version of the code used in the paper had a differently scaled objective (by 2) in the case of linear output units.  Thus we now need to reduce weightcost by a factor 2 to be consistent
 %%%%%%%%
+
+runName = 'KFAC3_faces_1';
+runDesc = '[[version 5]], expected output for FACES';
 %}
 
 
@@ -96,7 +103,7 @@ weightcost = weightcost / 2; %an older version of the code used in the paper had
 %%%%%%%%
 % CURVES
 %%%%%%%%
-
+%{
 %dataset available at www.cs.toronto.edu/~jmartens/digs3pts_1.mat
 
 tmp = load('digs3pts_1.mat');
@@ -119,6 +126,10 @@ layertypes = {'logistic', 'logistic', 'logistic', 'logistic', 'logistic', 'linea
 weightcost = 1e-5;
 %%%%%%%%
 
+runName = 'KFAC3_curves_1';
+runDesc = '[[version 5]], expected output for CURVES';
+
+%}
 
 
 
@@ -129,8 +140,6 @@ outtest = intest;
 
 
 
-runName = 'KFAC3_curves_1';
-runDesc = '[[version 5]], expected output for CURVES';
 
 
 
@@ -153,10 +162,10 @@ cacheOnGPU = 1;
 
 
 %how to perform computations
-%compMode = 'cpu_single; %standard cpu computation
-compMode = 'jacket'; %Jacket package (tests on autoencoders from the paper were done using this)
+%compMode = 'cpu_single'; %standard cpu computation
+%compMode = 'jacket'; %Jacket package (tests on autoencoders from the paper were done using this)
 %compMode = 'gpu_single'; %built-in MATLAB gpu stuff.  My tests indicate this is *much* slower than Jacket, and gives very low GPU utilization vs Jacket or various Python-based GPU packages.  Unfortunately you can't buy Jacket anymore because of Mathwork's litigious nature.  Please do not use this mode to benchmark K-FAC.
-
+compMode = 'gpu_double';
 
 %the error function to report (which is different from the objective, which is assumed to by the "matching" log-likelihood function associated with the output units)
 errtype = 'L2'; %L2-norm error
@@ -183,6 +192,6 @@ minibatch_maxsize_targetiter = 500; %there is a lot of room for tuning here.  Re
 %minibatch_maxsize_targetiter = 1000;
 
 
-
-KFAC_train_3( runName, runDesc, paramsp, Win, bin, resumeFile, maxiter, indata, outdata, intest, outtest, layersizes, layertypes, mattype, rms, errtype, weightcost, minibatch_startsize, minibatch_maxsize, minibatch_maxsize_targetiter, maxchunksize, compMode, cacheOnGPU);
+% KFAC
+nnet_train_2( runName, runDesc, paramsp, Win, bin, resumeFile, maxiter, indata, outdata, intest, outtest, layersizes, layertypes, mattype, rms, errtype, weightcost, minibatch_startsize, minibatch_maxsize, minibatch_maxsize_targetiter, maxchunksize, compMode, cacheOnGPU);
 

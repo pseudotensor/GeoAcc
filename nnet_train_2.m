@@ -1,4 +1,4 @@
-function paramsp = KFAC_train_3( runName, runDesc, paramsp, Win, bin, resumeFile, maxiter, indata, outdata, intest, outtest, layersizes, layertypes, mattype, rms, errtype, weightcost, minibatch_startsize, minibatch_maxsize, minibatch_maxsize_targetiter, maxchunksize, compMode, cacheOnGPU)
+function paramsp = nnet_train_2( runName, runDesc, paramsp, Win, bin, resumeFile, maxiter, indata, outdata, intest, outtest, layersizes, layertypes, mattype, rms, errtype, weightcost, minibatch_startsize, minibatch_maxsize, minibatch_maxsize_targetiter, maxchunksize, compMode, cacheOnGPU)
 
 %Companion code for the paper "Optimizing Neural Networks with Kronecker-Factored Approximate Curvature".
 %
@@ -126,7 +126,7 @@ autodamp = 1;
 
 
 checkpoint_every_iter = 500;
-save_every_iter = 50;
+save_every_iter = 1;
 report_full_obj_every_iter = 50;
 
 
@@ -2185,18 +2185,28 @@ for iter = iter:maxiter
     times(iter) = toc;
     %disp(['Time used: ' num2str(times(iter))]);
     
+    [ll, err] = computeLL(paramsp, indata, outdata);
+    llrecord(iter,1) = ll;
+    errrecord(iter,1) = err;
+
+    [ll_test, err_test] = computeLL(paramsp, intest, outtest);
+    llrecord(iter,2) = ll_test;
+    errrecord(iter,2) = err_test;
+
+    [ll_avg, err_avg] = computeLL(paramsp_avg, indata, outdata);
+    llrecord(iter,3) = ll_avg;
+    errrecord(iter,3) = err_avg;
+    
+    [ll_test_avg, err_test_avg] = computeLL(paramsp_avg, intest, outtest);
+    llrecord(iter,4) = ll_test_avg;
+    errrecord(iter,4) = err_test_avg;
+    
     if mod(iter, report_full_obj_every_iter) == 0
 
         outputString( '---' );
         
-        [ll, err] = computeLL(paramsp, indata, outdata);
-        llrecord(iter,1) = ll;
-        errrecord(iter,1) = err;
         outputString( ['Full log-likelihood: ' num2str(ll) ', error rate: ' num2str(err) ] );
         
-        [ll_test, err_test] = computeLL(paramsp, intest, outtest);
-        llrecord(iter,2) = ll_test;
-        errrecord(iter,2) = err_test;
         outputString( ['TEST log-likelihood: ' num2str(ll_test) ', error rate: ' num2str(err_test) ] );
 
         outputString( ['Error difference (test - train): ' num2str(err_test - err)] );
@@ -2205,14 +2215,8 @@ for iter = iter:maxiter
         
             outputString( '---' );
             
-            [ll_avg, err_avg] = computeLL(paramsp_avg, indata, outdata);
-            llrecord(iter,3) = ll_avg;
-            errrecord(iter,3) = err_avg;
             outputString( ['Full log-likelihood (averaged params): ' num2str(ll_avg) ', error rate (averaged params): ' num2str(err_avg) ] );
 
-            [ll_test_avg, err_test_avg] = computeLL(paramsp_avg, intest, outtest);
-            llrecord(iter,4) = ll_test_avg;
-            errrecord(iter,4) = err_test_avg;
             outputString( ['TEST log-likelihood (averaged params): ' num2str(ll_test_avg) ', error rate (averaged params): ' num2str(err_test_avg) ] );
             
             outputString( ['Error difference (test - train) (averaged params): ' num2str(err_test_avg - err_avg)] );

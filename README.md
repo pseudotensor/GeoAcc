@@ -12,6 +12,9 @@ https://arxiv.org/pdf/1503.05671.pdf (updated KFAC method by Martens)
 
 http://www.cs.toronto.edu/~jmartens/research.html (Codes HFDemo.zip and KFAC3-MATLAB.zip)
 
+https://arxiv.org/pdf/1602.01407.pdf (KFAC for CNNs)
+
+https://arxiv.org/abs/1412.1193 (ideas on natural gradient by Martens)
 
 # Requirements
 
@@ -19,7 +22,11 @@ http://www.cs.toronto.edu/~jmartens/research.html (Codes HFDemo.zip and KFAC3-MA
 
 # To run:
 
-* Download data: wget www.cs.toronto.edu/~jmartens/digs3pts_1.mat
+* Download data:
+
+wget www.cs.toronto.edu/~jmartens/mnist_all.mat
+wget www.cs.toronto.edu/~jmartens/digs3pts_1.mat
+wget www.cs.toronto.edu/~jmartens/newfaces_rot_single.mat
 
 * Open in Matlab: nnet_demo_2.m file
 
