@@ -241,7 +241,7 @@ elseif strcmp( compMode, 'gpu_double' )
 
     makeDouble = @(x) double(gather(x));
     
-    
+   
 elseif strcmp( compMode, 'cpu_single' )
 
     conv = @single;
