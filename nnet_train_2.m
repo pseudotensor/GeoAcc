@@ -1014,7 +1014,7 @@ end
 
 
 
-
+% compute damping lambda and error
 function [ll_local, err_local] = computeLL(paramsp_local, indata_local, outdata_local)
 
     ll_local = 0;
@@ -1105,6 +1105,275 @@ end
 
 
 
+
+
+% Compute term1 in geo
+% JCM: no need for algorithm2
+function GV = term1(V) % algorithm5
+
+    [VWu, Vbu] = unpack(V);
+    
+    GV = mzeros(psize,1);
+    
+    if hybridmode
+        chunkrange = targetchunk; %set outside
+    else
+        chunkrange = 1:numchunks;
+    end
+
+    for chunk = chunkrange
+        
+        %application of R operator
+        rdEdy = cell(numlayers+1,1);
+        rdEdx = cell(numlayers, 1);
+
+        GVW = cell(numlayers,1);
+        GVb = cell(numlayers,1);
+        
+        Rx = cell(numlayers,1);
+        Ry = cell(numlayers,1);
+
+        yip1 = conv(y{chunk, 1});
+
+        %forward prop:
+        Ryip1 = mzeros(layersizes(1), sizechunk);
+        Syip1 = mzeros(layersizes(1), sizechunk);
+            
+        for i = 1:numlayers
+
+            Ryi = Ryip1;
+            Ryip1 = [];
+            Syi = Syip1;
+            Syip1 = [];
+
+            yi = yip1;
+            yip1 = [];
+
+            Rxi = Wu{i}*Ryi + VWu{i}*yi + repmat(Vbu{i}, [1 sizechunk]);          
+            %Rx{i} = store(Rxi);
+            Sxi = 2 * VWu{i} * Ryi + Wu{i} * Syi;
+
+            yip1 = conv(y{chunk, i+1});
+
+            if strcmp(layertypes{i}, 'logistic')
+                Ryip1 = Rxi.*yip1.*(1-yip1);
+                Syip1 = (2*yip1-1).*yip1.*(yip1-1).*Rxi.*Rxi + yip1.*(1-yip1).*Sxi; 
+            elseif strcmp(layertypes{i}, 'tanh')
+                Ryip1 = Rxi.*(1+yip1).*(1-yip1);
+                Syip1 = (yip1-1).*(yip1+1).*(2*yip1).*Rxi.*Rxi + (1+yip1).*(1-yip1).*Sxi; 
+            elseif strcmp(layertypes{i}, 'linear')
+                Ryip1 = Rxi;
+                Syip1 = Sxi;            
+            else
+                error( 'Unknown/unsupported layer type' );
+            end
+            
+            Rxi = [];
+            Sxi = [];
+        end
+        
+        %Backwards pass.  This is where things start to differ from computeHV  Please note that the lower-case r 
+        %notation doesn't really make sense so don't bother trying to decode it.  Instead there is a much better
+        %way of thinkin about the GV computation, with its own notation, which I talk about in my more recent paper: 
+        %"Learning Recurrent Neural Networks with Hessian-Free Optimization"
+        for i = numlayers:-1:1
+
+            if i < numlayers
+                %logistics:
+                if strcmp(layertypes{i}, 'logistic')
+                    rdEdx{i} = rdEdy{i+1}.*yip1.*(1-yip1);
+                elseif strcmp(layertypes{i}, 'tanh')
+                    rdEdx{i} = rdEdy{i+1}.*(1+yip1).*(1-yip1);
+                elseif strcmp(layertypes{i}, 'linear')
+                    rdEdx{i} = rdEdy{i+1};
+                else
+                    error( 'Unknown/unsupported layer type' );
+                end
+            else
+                if ~rms
+                    %assume canonical link functions:
+                    rdEdx{i} = Syip1; % Correct the sign
+                    
+                    if strcmp(layertypes{i}, 'linear')
+                        rdEdx{i} = 2*rdEdx{i};
+                    end
+                else
+                    error( 'Not supported in term1' );                                        
+                end
+                
+                Ryip1 = [];
+                Syip1 = [];
+            end
+            rdEdy{i+1} = [];
+            
+            rdEdy{i} = Wu{i}'*rdEdx{i};
+
+            yi = conv(y{chunk, i});
+
+            GVW{i} = rdEdx{i}*yi';
+            GVb{i} = sum(rdEdx{i},2);
+
+            rdEdx{i} = [];
+
+            yip1 = yi;
+            yi = [];
+        end
+        yip1 = [];
+        rdEdy{1} = [];
+
+        GV = GV + pack(GVW, GVb);
+        
+    end
+    
+    GV = GV / conv(numcases);
+    
+    if hybridmode
+        GV = GV * conv(numchunks);
+    end
+    %???? I am not sure about this
+    GV = GV - conv(weightcost)*(maskp.*V);    
+end
+
+
+% Compute term2 in geo
+function GV = term2(V) % algorithm6
+
+    [VWu, Vbu] = unpack(V);
+    
+    GV = mzeros(psize,1);
+    
+    if hybridmode
+        chunkrange = targetchunk; %set outside
+    else
+        chunkrange = 1:numchunks;
+    end
+
+    for chunk = chunkrange
+        
+        %application of R operator
+        rdEdy = cell(numlayers+1,1);
+        rdEdx = cell(numlayers, 1);
+
+        GVW = cell(numlayers,1);
+        GVb = cell(numlayers,1);
+        
+        Rx = cell(numlayers,1);
+        Ry = cell(numlayers,1);
+
+        yip1 = conv(y{chunk, 1});
+
+        %forward prop:
+        Ryip1 = mzeros(layersizes(1), sizechunk);
+            
+        for i = 1:numlayers
+
+            Ryi = Ryip1;
+            Ryip1 = [];
+
+            yi = yip1;
+            yip1 = [];
+
+            Rxi = Wu{i}*Ryi + VWu{i}*yi + repmat(Vbu{i}, [1 sizechunk]);
+            %Rx{i} = store(Rxi);
+
+            yip1 = conv(y{chunk, i+1});
+
+            if strcmp(layertypes{i}, 'logistic')
+                Ryip1 = Rxi.*yip1.*(1-yip1);
+            elseif strcmp(layertypes{i}, 'tanh')
+                Ryip1 = Rxi.*(1+yip1).*(1-yip1);
+            elseif strcmp(layertypes{i}, 'linear')
+                Ryip1 = Rxi;
+            elseif strcmp( layertypes{i}, 'softmax' )
+                Ryip1 = Rxi.*yip1 - yip1.* repmat( sum( Rxi.*yip1, 1 ), [layersizes(i+1) 1] );
+            else
+                error( 'Unknown/unsupported layer type' );
+            end
+            
+            Rxi = [];
+
+        end
+        
+        %Backwards pass.  This is where things start to differ from computeHV  Please note that the lower-case r 
+        %notation doesn't really make sense so don't bother trying to decode it.  Instead there is a much better
+        %way of thinkin about the GV computation, with its own notation, which I talk about in my more recent paper: 
+        %"Learning Recurrent Neural Networks with Hessian-Free Optimization"
+        for i = numlayers:-1:1
+
+            if i < numlayers
+                %logistics:
+                if strcmp(layertypes{i}, 'logistic')
+                    rdEdx{i} = rdEdy{i+1}.*yip1.*(1-yip1);
+                elseif strcmp(layertypes{i}, 'tanh')
+                    rdEdx{i} = rdEdy{i+1}.*(1+yip1).*(1-yip1);
+                elseif strcmp(layertypes{i}, 'linear')
+                    rdEdx{i} = rdEdy{i+1};
+                else
+                    error( 'Unknown/unsupported layer type' );
+                end
+            else
+                if ~rms
+                    %assume canonical link functions:
+                    yip1 = conv(y{chunk, numlayers + 1});
+                    coeff = ((2*yip1-1)./2./(yip1.*(1-yip1)));
+                    coeff(Ryip1 == 0) = 0;
+                    rdEdx{i} = coeff.*Ryip1.^2; % correct the sign
+                    
+                    if strcmp(layertypes{i}, 'linear')
+                        rdEdx{i} = 2*rdEdx{i};
+                    end
+                else                    
+                    error(' Not supported in term2!')                    
+                end
+                
+                Ryip1 = [];
+
+            end
+            rdEdy{i+1} = [];
+            
+            rdEdy{i} = Wu{i}'*rdEdx{i};
+
+            yi = conv(y{chunk, i});
+
+            GVW{i} = rdEdx{i}*yi';
+            GVb{i} = sum(rdEdx{i},2);
+
+            rdEdx{i} = [];
+
+            yip1 = yi;
+            yi = [];
+        end
+        yip1 = [];
+        rdEdy{1} = [];
+
+        GV = GV + pack(GVW, GVb);
+        
+    end
+    
+    GV = GV / conv(numcases);
+    
+    if hybridmode
+        GV = GV * conv(numchunks);
+    end
+    %???? I am not sure about this!
+    GV = GV - conv(weightcost)*(maskp.*V);        
+end
+
+
+
+
+
+
+
+
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%% BEGIN GLOBAL CODE %%%%%%%%%%%%%%%%%%%
+
+hybridmode=1
+
 maskp = mones(psize,1);
 [maskW, maskb] = unpack(maskp);
 for i = 1:length(maskb)
@@ -1138,8 +1407,9 @@ outputString( '' );
 outputString( ['Description: ' runDesc] );
 outputString( '' );
 
-
-ch = mzeros(psize, 1);
+% ng and geo separate terms
+ch1 = mzeros(psize, 1);
+ch2 = mzeros(psize, 1);
 paramsp_avg = mzeros(psize,1);
 
 for i = 1:numlayers
@@ -1167,14 +1437,15 @@ end
 
 
 
-
+% setup resume/checkpoint file
 if ~isempty( resumeFile )
     outputString( ['Resuming from file: ' resumeFile] );
     outputString( '' );
     
     load( resumeFile );
     
-    ch = conv(ch);
+    ch1 = conv(ch1);
+    ch2 = conv(ch2);
     paramsp = conv(paramsp);
     paramsp_avg = conv(paramsp_avg);
 
@@ -1213,6 +1484,8 @@ else
     
 end
 
+
+% setup paramsp
 if isempty(paramsp)
     if ~isempty(Win)
         paramsp = pack(Win,bin);
@@ -1302,6 +1575,10 @@ else
     paramsp = conv(paramsp);
 end
 
+
+
+
+% output initial parameter values
 outputString( 'Initial constant values:' );
 outputString( '------------------------' );
 outputString( '' );
@@ -1332,7 +1609,10 @@ firstIterFlag = 1;
 
 startingIter = iter;
 
+% iterate over epochs, each with a single mini-batch
 for iter = iter:maxiter
+
+
 
     tic
 
@@ -1400,6 +1680,7 @@ for iter = iter:maxiter
 
     %disp( ['numchunks = ' num2str(numchunks) ] );
     
+    targetchunk = mod(iter-1, numchunks)+1;
     
     
     for i = 1:numlayers
@@ -1900,9 +2181,11 @@ for iter = iter:maxiter
     end
     
     
-    oldch = ch;
+    oldch1 = ch1;
+    oldch2 = ch2;
 
-    vals = [];
+    vals1 = [];
+    vals2 = [];
     lls = [];
     
 
@@ -2063,14 +2346,27 @@ for iter = iter:maxiter
             %invpreconFunc = @compute_BlkV;
         end
 
+        %ng
         %Use the quadratic model derived from the exact Fisher to compute an effective learning rate and momentum decay constant
         if useMomentum
-            v = {preconFunc(grad), oldch};
+            v1 = {preconFunc(grad), oldch1};
         else
-            v = {preconFunc(grad)};
+            v1 = {preconFunc(grad)};
         end
-        [chs{gamma_idx}, vals(gamma_idx), coeffs{gamma_idx}] = basic_quad_opt1_factored7( computeBfactV, grad, v, zeros(psize,1), numchunks_BV, makeDouble );
-        
+        [chs1{gamma_idx}, vals1(gamma_idx), coeffs1{gamma_idx}] = basic_quad_opt1_factored7( computeBfactV, grad, v1, zeros(psize,1), numchunks_BV, makeDouble );
+
+        if 1
+           % geo
+           %Use the quadratic model derived from the exact Fisher to compute an effective learning rate and momentum decay constant
+           if useMomentum
+              %v2 = {preconFunc(term1(oldch1)+term2(oldch1)), oldch2};
+              v2=v1;
+           else
+              %v2 = {preconFunc(term1(oldch1)+term2(oldch1))};
+              v2=v1;
+           end
+           [chs2{gamma_idx}, vals2(gamma_idx), coeffs2{gamma_idx}] = basic_quad_opt1_factored7( computeBfactV, term1(oldch1)+term2(oldch1), v2, zeros(psize,1), numchunks_BV, makeDouble );
+        end
         
 
         %Fixed learning rate (alpha) and momentum decay (mu) as alternative to determining these from quadratic model (using basic_quad_opt1_factored6 as above).  Would need to tune these, and turn off gamma and lambda adjustment (i.e. setting lambda/gamma_adj_interval = Inf), etc.
@@ -2079,22 +2375,41 @@ for iter = iter:maxiter
         if ~useMomentum
             mu = 0;
         end
-        chs{gamma_idx,lambda_idx} = alpha*preconFunc(grad) + mu*oldch;
-        vals(gamma_idx,lambda_idx) = 0; %we don't have a value for this
-        coeffs{gamma_idx,lambda_idx} = [alpha mu];
+
+        % ng
+        chs1{gamma_idx,lambda_idx} = alpha*preconFunc(grad) + mu*oldch1;
+        vals1(gamma_idx,lambda_idx) = 0; %we don't have a value for this
+        coeffs1{gamma_idx,lambda_idx} = [alpha mu];
+
+        % geo
+        chs1{gamma_idx,lambda_idx} = alpha*preconFunc(term1(oldch1)+term2(oldch1)) + mu*oldch2;
+        vals1(gamma_idx,lambda_idx) = 0; %we don't have a value for this
+        coeffs1{gamma_idx,lambda_idx} = [alpha mu];
+
         steps = 1;
         %}
         
     end
+
+    % ng
+    [val1, gamma_idx_best1] = min( vals1 );
+    % geo
+    [val2, gamma_idx_best2] = min( vals2 );
+
+    % ng
+    val1 = vals1(gamma_idx_best1);
+    gamma1 = gammas(gamma_idx_best1);
+    ch1 = chs1{gamma_idx_best1};
+    coeff1 = coeffs1{gamma_idx_best1};
     
-    [val, gamma_idx_best] = min( vals );
-    
-    val = vals(gamma_idx_best);
-    gamma = gammas(gamma_idx_best);
-    ch = chs{gamma_idx_best};
-    coeff = coeffs{gamma_idx_best};
-    
-    
+    % geo
+    val2 = vals2(gamma_idx_best2);
+    gamma2 = gammas(gamma_idx_best2);
+    ch2 = chs2{gamma_idx_best};
+    coeff2 = coeffs2{gamma_idx_best};
+
+
+    % only use ng version for these damping and momentum terms for now
     if refreshInvApprox
         inv_dEdx2_damp = inv_dEdx2_damp_storage{gamma_idx_best};
         inv_y_hom2_damp = inv_y_hom2_damp_storage{gamma_idx_best};
@@ -2123,7 +2438,8 @@ for iter = iter:maxiter
         outputString(['New gamma: ' num2str(gamma)]);
     end
     
-    outputString( ['norm(ch) = ' num2str(norm(ch))] );
+    outputString( ['norm(ch1) = ' num2str(norm(ch1))] );
+    outputString( ['norm(ch2) = ' num2str(norm(ch2))] );
     
     
     if mod(iter,lambda_adj_interval) == 0
@@ -2131,7 +2447,14 @@ for iter = iter:maxiter
 
         denom = -val;
 
-        [ll, err] = computeLL(paramsp + ch, indata_minibatch, outdata_minibatch);
+        % ng+geo
+        if 0
+                [ll, err] = computeLL(paramsp + ch1 + ch2, indata_minibatch, outdata_minibatch);
+        end
+        % ng only
+        if 1
+                [ll, err] = computeLL(paramsp + ch1, indata_minibatch, outdata_minibatch);
+        end
         
         rho = (ll-oldll)/denom;
         if oldll - ll > 0
@@ -2153,7 +2476,18 @@ for iter = iter:maxiter
     
     rate = 1.0;
     %Parameter update:
-    paramsp = paramsp + conv(rate)*ch;
+    % JCM: ch1: natural gradient
+    % JCM: ch2: geodesic acceleration term
+    
+    % ng with geo
+    if 0
+       paramsp = paramsp + conv(rate)*ch1 - 0.5*conv(rate^2)*ch2;
+    end
+
+    % pure ng
+    if 1
+        paramsp = paramsp + conv(rate)*ch1;
+    end
     
     
     if iter < avg_start
@@ -2234,8 +2568,12 @@ for iter = iter:maxiter
         
         paramsp_tmp = paramsp;
         paramsp = single(paramsp);
-        ch_tmp = ch;
-        ch = single(ch);
+        % ng        
+        ch1_tmp = ch1;
+        ch1 = single(ch1);
+        % geo
+        ch2_tmp = ch2;
+        ch2 = single(ch2);
 
         y_hom2_tmp = y_hom2;
         dEdx2_tmp = dEdx2;
@@ -2253,19 +2591,20 @@ for iter = iter:maxiter
         paramsp_avg = single(paramsp_avg);
         
         
-        save( [runName '_nnet_running.mat'], 'paramsp', 'ch', 'iter', 'lambda', 'llrecord', 'times', 'errrecord', 'lambdarecord', 'y_hom2', 'dEdx2', 'paramsp_avg', 'gamma' );
+        save( [runName '_nnet_running.mat'], 'paramsp', 'ch1', 'ch2', 'iter', 'lambda', 'llrecord', 'times', 'errrecord', 'lambdarecord', 'y_hom2', 'dEdx2', 'paramsp_avg', 'gamma' );
 
         if mod(iter, checkpoint_every_iter) == 0
-            save( [runName '_nnet_iter' num2str(iter) '.mat'], 'paramsp', 'ch', 'iter', 'lambda', 'llrecord', 'times', 'errrecord', 'lambdarecord', 'y_hom2', 'dEdx2', 'paramsp_avg', 'gamma' );
+            save( [runName '_nnet_iter' num2str(iter) '.mat'], 'paramsp', 'ch1', 'ch2', 'iter', 'lambda', 'llrecord', 'times', 'errrecord', 'lambdarecord', 'y_hom2', 'dEdx2', 'paramsp_avg', 'gamma' );
         end
         
         paramsp = paramsp_tmp;
-        ch = ch_tmp;
+        ch1 = ch1_tmp;
+        ch2 = ch2_tmp;
         y_hom2 = y_hom2_tmp;
         dEdx2 = dEdx2_tmp;
         paramsp_avg = paramsp_avg_tmp;
 
-        clear paramsp_tmp ch_tmp y_hom2_tmp dEdx2_tmp paramsp_avg_tmp
+        clear paramsp_tmp ch1_tmp ch2_tmp y_hom2_tmp dEdx2_tmp paramsp_avg_tmp
     end
 
     firstIterFlag = 0;
