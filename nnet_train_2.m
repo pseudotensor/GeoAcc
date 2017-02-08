@@ -1328,11 +1328,26 @@ end
 grad2 = mzeros(psize,1);
 
 
+
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%
+% Iterate over mini-batches
+%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+paramsp_last=paramsp % copy over (not by reference)
+whichstep=0; % 0 = half-step  1 = full step
+fulliter=0; % count full iterations
+
 firstIterFlag = 1;
 
 startingIter = iter;
 
 for iter = iter:maxiter
+    % alternate half and full step, starting with full step
+    whichstep=mod(iter-startingIter,2);
 
     tic
 
@@ -2149,11 +2164,22 @@ for iter = iter:maxiter
             outputString(['New lambda: ' num2str(lambda)]);
         end
     end
+
+
+    % if half-step
+    if whichstep==0
+        paramsp_last=paramsp; % save last full-step result
+        rate = 1.0;
+        %Parameter update:
+        paramsp = paramsp + 0.5*conv(rate)*ch;
+    end
     
-    
-    rate = 1.0;
-    %Parameter update:
-    paramsp = paramsp + conv(rate)*ch;
+    if whichstep==1
+       fulliter=fulliter+1;
+       rate = 1.0;
+       %Parameter update:
+       paramsp = paramsp_last + 1.0*conv(rate)*ch;
+    end
     
     
     if iter < avg_start
@@ -2171,10 +2197,10 @@ for iter = iter:maxiter
 
     %outputString( ['iter: ' num2str(iter) ', Minibatch log likelihood: ' num2str(ll) ', error rate: ' num2str(err) ] );
     if ~isempty(ll)
-        outputString( ['iter: ' num2str(iter) ', Minibatch log likelihood (pre-update): ' num2str(oldll) ', error rate (pre-update): ' num2str(olderr) ] );
-        outputString( ['iter: ' num2str(iter) ', Minibatch log likelihood (post-update): ' num2str(ll) ', error rate (post-update): ' num2str(err) ] );
+        outputString( ['iter: ' num2str(iter) ', 'fulliter: ' num2str(fulliter) ', Minibatch log likelihood (pre-update): ' num2str(oldll) ', error rate (pre-update): ' num2str(olderr) ] );
+        outputString( ['iter: ' num2str(iter) ', 'fulliter: ' num2str(fulliter) ', Minibatch log likelihood (post-update): ' num2str(ll) ', error rate (post-update): ' num2str(err) ] );
     else
-        outputString( ['iter: ' num2str(iter) ', Minibatch log likelihood (pre-update): ' num2str(oldll) ', error rate (pre-update): ' num2str(olderr) ] );
+        outputString( ['iter: ' num2str(iter) ', 'fulliter: ' num2str(fulliter) ', Minibatch log likelihood (pre-update): ' num2str(oldll) ', error rate (pre-update): ' num2str(olderr) ] );
     end
     
     
@@ -2230,7 +2256,7 @@ for iter = iter:maxiter
     pause(0)
     drawnow
     
-    if mod(iter, save_every_iter) == 0
+    if mod(iter, save_every_iter) == 0 & whichstep==1
         
         paramsp_tmp = paramsp;
         paramsp = single(paramsp);
