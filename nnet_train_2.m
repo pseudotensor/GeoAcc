@@ -40,8 +40,8 @@ useTriBlock = 1;
 %useTriBlock = 0
 
 %Use the automatically calibrated momentum discussed in the paper
-useMomentum = 1;
-%useMomentum = 0;
+%useMomentum = 1;
+useMomentum = 0;
 
 %Use eigenvalue decompositions in favor of inverses (saves some work at the cost of introducing more work.  Trade-off depends on various factors and other metaparameters)
 useEIGs = 1;
@@ -127,7 +127,7 @@ autodamp = 1;
 
 checkpoint_every_iter = 500;
 save_every_iter = 1;
-report_full_obj_every_iter = 50;
+report_full_obj_every_iter = 1;
 
 
 
@@ -612,7 +612,245 @@ function GV = computeGV(V)
     
 end
 
+function GV = term1(V)
 
+    [VWu, Vbu] = unpack(V);
+    
+    GV = mzeros(psize,1);
+    
+
+    chunkrange = 1:numchunks;
+
+    for chunk = chunkrange
+        
+        %application of R operator
+        rdEdy = cell(numlayers+1,1);
+        rdEdx = cell(numlayers, 1);
+
+        GVW = cell(numlayers,1);
+        GVb = cell(numlayers,1);
+        
+        Rx = cell(numlayers,1);
+        Ry = cell(numlayers,1);
+
+        yip1 = conv(y{1, chunk});
+
+        %forward prop:
+        Ryip1 = mzeros(layersizes(1), sizechunk(chunk));     
+        Syip1 = mzeros(layersizes(1), sizechunk(chunk));
+            
+        for i = 1:numlayers
+
+            Ryi = Ryip1;
+            Ryip1 = [];
+            Syi = Syip1;
+            Syip1 = [];
+
+            yi = yip1;
+            yip1 = [];
+
+            Rxi = Wu{i}*Ryi + VWu{i}*yi + repmat(Vbu{i}, [1 sizechunk(chunk)]);          
+            %Rx{i} = store(Rxi);
+            Sxi = 2 * VWu{i} * Ryi + Wu{i} * Syi;
+
+            yip1 = conv(y{i+1, chunk});
+
+            if strcmp(layertypes{i}, 'logistic')
+                Ryip1 = Rxi.*yip1.*(1-yip1);
+                Syip1 = (2*yip1-1).*yip1.*(yip1-1).*Rxi.*Rxi + yip1.*(1-yip1).*Sxi; 
+            elseif strcmp(layertypes{i}, 'tanh')
+                Ryip1 = Rxi.*(1+yip1).*(1-yip1);
+                Syip1 = (yip1-1).*(yip1+1).*(2*yip1).*Rxi.*Rxi + (1+yip1).*(1-yip1).*Sxi; 
+            elseif strcmp(layertypes{i}, 'linear')
+                Ryip1 = Rxi;
+                Syip1 = Sxi;            
+            else
+                error( 'Unknown/unsupported layer type' );
+            end
+            
+            Rxi = [];
+            Sxi = [];
+        end
+        
+        %Backwards pass.  This is where things start to differ from computeHV  Please note that the lower-case r 
+        %notation doesn't really make sense so don't bother trying to decode it.  Instead there is a much better
+        %way of thinkin about the GV computation, with its own notation, which I talk about in my more recent paper: 
+        %"Learning Recurrent Neural Networks with Hessian-Free Optimization"
+        for i = numlayers:-1:1
+
+            if i < numlayers
+                %logistics:
+                if strcmp(layertypes{i}, 'logistic')
+                    rdEdx{i} = rdEdy{i+1}.*yip1.*(1-yip1);
+                elseif strcmp(layertypes{i}, 'tanh')
+                    rdEdx{i} = rdEdy{i+1}.*(1+yip1).*(1-yip1);
+                elseif strcmp(layertypes{i}, 'linear')
+                    rdEdx{i} = rdEdy{i+1};
+                else
+                    error( 'Unknown/unsupported layer type' );
+                end
+            else
+                if ~rms
+                    %assume canonical link functions:
+                    rdEdx{i} = Syip1; % Correct the sign
+                    
+                    if strcmp(layertypes{i}, 'linear')
+                        rdEdx{i} = 2*rdEdx{i};
+                    end
+                else
+                    error( 'Not supported in term1' );                                        
+                end
+                
+                Ryip1 = [];
+                Syip1 = [];
+            end
+            rdEdy{i+1} = [];
+            
+            rdEdy{i} = Wu{i}'*rdEdx{i};
+
+            yi = conv(y{i, chunk});
+
+            GVW{i} = rdEdx{i}*yi';
+            GVb{i} = sum(rdEdx{i},2);
+
+            rdEdx{i} = [];
+
+            yip1 = yi;
+            yi = [];
+        end
+        yip1 = [];
+        rdEdy{1} = [];
+
+        GV = GV + pack(GVW, GVb);
+        
+    end
+    
+    GV = GV / conv(numcases);
+    
+    %???? I am not sure about this
+    %GV = GV - conv(weightcost)*(maskp.*V);
+end
+
+function GV = term2(V)
+
+    [VWu, Vbu] = unpack(V);
+    
+    GV = mzeros(psize,1);
+    
+
+    chunkrange = 1:numchunks;
+
+
+    for chunk = chunkrange
+        
+        %application of R operator
+        rdEdy = cell(numlayers+1,1);
+        rdEdx = cell(numlayers, 1);
+
+        GVW = cell(numlayers,1);
+        GVb = cell(numlayers,1);
+        
+        Rx = cell(numlayers,1);
+        Ry = cell(numlayers,1);
+
+        yip1 = conv(y{1, chunk});
+
+        %forward prop:
+        Ryip1 = mzeros(layersizes(1), sizechunk(chunk));
+            
+        for i = 1:numlayers
+
+            Ryi = Ryip1;
+            Ryip1 = [];
+
+            yi = yip1;
+            yip1 = [];
+
+            Rxi = Wu{i}*Ryi + VWu{i}*yi + repmat(Vbu{i}, [1 sizechunk(chunk)]);
+            %Rx{i} = store(Rxi);
+
+            yip1 = conv(y{i+1, chunk});
+
+            if strcmp(layertypes{i}, 'logistic')
+                Ryip1 = Rxi.*yip1.*(1-yip1);
+            elseif strcmp(layertypes{i}, 'tanh')
+                Ryip1 = Rxi.*(1+yip1).*(1-yip1);
+            elseif strcmp(layertypes{i}, 'linear')
+                Ryip1 = Rxi;
+            elseif strcmp( layertypes{i}, 'softmax' )
+                Ryip1 = Rxi.*yip1 - yip1.* repmat( sum( Rxi.*yip1, 1 ), [layersizes(i+1) 1] );
+            else
+                error( 'Unknown/unsupported layer type' );
+            end
+            
+            Rxi = [];
+
+        end
+        
+        %Backwards pass.  This is where things start to differ from computeHV  Please note that the lower-case r 
+        %notation doesn't really make sense so don't bother trying to decode it.  Instead there is a much better
+        %way of thinkin about the GV computation, with its own notation, which I talk about in my more recent paper: 
+        %"Learning Recurrent Neural Networks with Hessian-Free Optimization"
+        for i = numlayers:-1:1
+
+            if i < numlayers
+                %logistics:
+                if strcmp(layertypes{i}, 'logistic')
+                    rdEdx{i} = rdEdy{i+1}.*yip1.*(1-yip1);
+                elseif strcmp(layertypes{i}, 'tanh')
+                    rdEdx{i} = rdEdy{i+1}.*(1+yip1).*(1-yip1);
+                elseif strcmp(layertypes{i}, 'linear')
+                    rdEdx{i} = rdEdy{i+1};
+                else
+                    error( 'Unknown/unsupported layer type' );
+                end
+            else
+                if ~rms
+                    %assume canonical link functions:
+                    yip1 = conv(y{numlayers + 1, chunk});
+                    coeff = ((2*yip1-1)./2./(yip1.*(1-yip1)));
+                    coeff(Ryip1 == 0) = 0;
+                    rdEdx{i} = coeff.*Ryip1.^2; % correct the sign
+                    
+                    if strcmp(layertypes{i}, 'linear')
+                        rdEdx{i} = 2*rdEdx{i};
+                    end
+                else                    
+                    error(' Not supported in term2!')                    
+                end
+                
+                Ryip1 = [];
+
+            end
+            rdEdy{i+1} = [];
+            
+            rdEdy{i} = Wu{i}'*rdEdx{i};
+
+            yi = conv(y{i, chunk});
+
+            GVW{i} = rdEdx{i}*yi';
+            GVb{i} = sum(rdEdx{i},2);
+
+            rdEdx{i} = [];
+
+            yip1 = yi;
+            yi = [];
+        end
+        yip1 = [];
+        rdEdy{1} = [];
+
+        GV = GV + pack(GVW, GVb);
+        
+    end
+    
+    GV = GV / conv(numcases);
+    
+
+    GV = GV * conv(numchunks);
+
+    %???? I am not sure about this!
+    %GV = GV - conv(weightcost)*(maskp.*V);        
+end
 
 %factorized Fisher-vector product
 function GfactV = computeGfactV(V,chunk)
@@ -1117,7 +1355,7 @@ maskp = pack(maskW,maskb);
 indata = single(indata);
 outdata = single(outdata);
 intest = single(intest);
-outtest = single(outtest);
+outtest = single(outtest);   
 
 
 function outputString( s )
@@ -1326,6 +1564,9 @@ end
 
 
 grad2 = mzeros(psize,1);
+
+paramsp_last=paramsp*0.0;
+paramsp_last2=paramsp*0.0;
 
 
 firstIterFlag = 1;
@@ -2064,15 +2305,40 @@ for iter = iter:maxiter
         end
 
         %Use the quadratic model derived from the exact Fisher to compute an effective learning rate and momentum decay constant
-        if useMomentum
-            v = {preconFunc(grad), oldch};
+        
+        Delta1 = preconFunc(grad);
+        if strcmp(layertypes{numlayers}, 'logistic')
+            Delta2 = preconFunc(term1(Delta1) + term2(Delta1));
+        elseif strcmp(layertypes{numlayers}, 'linear')
+            Delta2 = preconFunc(term1(Delta1));
         else
-            v = {preconFunc(grad)};
+            error('loss not supported!')
         end
-        [chs{gamma_idx}, vals(gamma_idx), coeffs{gamma_idx}] = basic_quad_opt1_factored7( computeBfactV, grad, v, zeros(psize,1), numchunks_BV, makeDouble );
+        
+        % JCM: for iter=0,1, normal update, but then use Verlet integration
+        % for iter>=2
+        if iter-startingIter>=2
+            Delta1=Delta1*0.0;
+        end
+        
+        if useMomentum
+            v = {Delta1, Delta2, oldch};
+        else
+            v = {Delta1, Delta2};
+        end
         
         
-
+        if useMomentum
+            [chs{gamma_idx}, vals(gamma_idx), coeffs{gamma_idx}] = geo_quad_opt_momentum( computeBfactV, grad, v, zeros(psize,1), numchunks_BV, makeDouble );
+        else
+            % Use this to test independent stepsizes for ng and geo.
+            %[chs{gamma_idx}, vals(gamma_idx), coeffs{gamma_idx}] = geo_quad_opt_free_no_momentum( computeBfactV, grad, v, zeros(psize,1), numchunks_BV, makeDouble );
+            [chs{gamma_idx}, vals(gamma_idx), coeffs{gamma_idx}] = geo_quad_opt_no_momentum( computeBfactV, grad, v, zeros(psize,1), numchunks_BV, makeDouble );
+        end
+        % Those are other alternative update schemes
+        %[chs{gamma_idx}, vals(gamma_idx), coeffs{gamma_idx}] = geo_determine_stepsize_by_ratio( computeBfactV, grad, v, zeros(psize,1), numchunks_BV, makeDouble );
+        %[chs{gamma_idx}, vals(gamma_idx), coeffs{gamma_idx}] = geo_quad_opt_ng_no_momentum( computeBfactV, grad, v, zeros(psize,1), numchunks_BV, makeDouble );        
+        
         %Fixed learning rate (alpha) and momentum decay (mu) as alternative to determining these from quadratic model (using basic_quad_opt1_factored6 as above).  Would need to tune these, and turn off gamma and lambda adjustment (i.e. setting lambda/gamma_adj_interval = Inf), etc.
         %{
         alpha = 0.01; mu = 0.95;
@@ -2150,10 +2416,18 @@ for iter = iter:maxiter
         end
     end
     
+    % store old parameters
+    paramsp_last2 = paramsp_last;
+    paramsp_last = paramsp;
     
     rate = 1.0;
     %Parameter update:
-    paramsp = paramsp + conv(rate)*ch;
+    if iter-startingIter<=1
+        paramsp = paramsp + conv(rate)*ch;
+    end
+    if iter-startingIter>=2
+        paramsp = 2.0*paramsp_last - paramsp_last2 + 2.0*conv(rate)*ch;
+    end
     
     
     if iter < avg_start
@@ -2185,28 +2459,18 @@ for iter = iter:maxiter
     times(iter) = toc;
     %disp(['Time used: ' num2str(times(iter))]);
     
-    [ll, err] = computeLL(paramsp, indata, outdata);
-    llrecord(iter,1) = ll;
-    errrecord(iter,1) = err;
-
-    [ll_test, err_test] = computeLL(paramsp, intest, outtest);
-    llrecord(iter,2) = ll_test;
-    errrecord(iter,2) = err_test;
-
-    [ll_avg, err_avg] = computeLL(paramsp_avg, indata, outdata);
-    llrecord(iter,3) = ll_avg;
-    errrecord(iter,3) = err_avg;
-    
-    [ll_test_avg, err_test_avg] = computeLL(paramsp_avg, intest, outtest);
-    llrecord(iter,4) = ll_test_avg;
-    errrecord(iter,4) = err_test_avg;
-    
     if mod(iter, report_full_obj_every_iter) == 0
 
         outputString( '---' );
         
+        [ll, err] = computeLL(paramsp, indata, outdata);
+        llrecord(iter,1) = ll;
+        errrecord(iter,1) = err;
         outputString( ['Full log-likelihood: ' num2str(ll) ', error rate: ' num2str(err) ] );
         
+        [ll_test, err_test] = computeLL(paramsp, intest, outtest);
+        llrecord(iter,2) = ll_test;
+        errrecord(iter,2) = err_test;
         outputString( ['TEST log-likelihood: ' num2str(ll_test) ', error rate: ' num2str(err_test) ] );
 
         outputString( ['Error difference (test - train): ' num2str(err_test - err)] );
@@ -2215,8 +2479,14 @@ for iter = iter:maxiter
         
             outputString( '---' );
             
+            [ll_avg, err_avg] = computeLL(paramsp_avg, indata, outdata);
+            llrecord(iter,3) = ll_avg;
+            errrecord(iter,3) = err_avg;
             outputString( ['Full log-likelihood (averaged params): ' num2str(ll_avg) ', error rate (averaged params): ' num2str(err_avg) ] );
 
+            [ll_test_avg, err_test_avg] = computeLL(paramsp_avg, intest, outtest);
+            llrecord(iter,4) = ll_test_avg;
+            errrecord(iter,4) = err_test_avg;
             outputString( ['TEST log-likelihood (averaged params): ' num2str(ll_test_avg) ', error rate (averaged params): ' num2str(err_test_avg) ] );
             
             outputString( ['Error difference (test - train) (averaged params): ' num2str(err_test_avg - err_avg)] );

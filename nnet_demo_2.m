@@ -164,8 +164,8 @@ cacheOnGPU = 1;
 %how to perform computations
 %compMode = 'cpu_single'; %standard cpu computation
 %compMode = 'jacket'; %Jacket package (tests on autoencoders from the paper were done using this)
-%compMode = 'gpu_single'; %built-in MATLAB gpu stuff.  My tests indicate this is *much* slower than Jacket, and gives very low GPU utilization vs Jacket or various Python-based GPU packages.  Unfortunately you can't buy Jacket anymore because of Mathwork's litigious nature.  Please do not use this mode to benchmark K-FAC.
-compMode = 'gpu_double';
+compMode = 'gpu_single'; %built-in MATLAB gpu stuff.  My tests indicate this is *much* slower than Jacket, and gives very low GPU utilization vs Jacket or various Python-based GPU packages.  Unfortunately you can't buy Jacket anymore because of Mathwork's litigious nature.  Please do not use this mode to benchmark K-FAC.
+%compMode = 'gpu_double';
 
 %the error function to report (which is different from the objective, which is assumed to by the "matching" log-likelihood function associated with the output units)
 errtype = 'L2'; %L2-norm error
